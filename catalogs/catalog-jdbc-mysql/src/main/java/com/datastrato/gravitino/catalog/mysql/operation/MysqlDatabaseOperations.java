@@ -10,10 +10,11 @@ import com.datastrato.gravitino.catalog.jdbc.operation.JdbcDatabaseOperations;
 import com.datastrato.gravitino.exceptions.NoSuchSchemaException;
 import com.datastrato.gravitino.meta.AuditInfo;
 import com.google.common.collect.ImmutableMap;
+
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
+import java.sql.PreparedStatement;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -61,17 +62,19 @@ public class MysqlDatabaseOperations extends JdbcDatabaseOperations {
 
   @Override
   public String generateDropDatabaseSql(String databaseName, boolean cascade) {
+
     final String dropDatabaseSql = "DROP DATABASE `" + databaseName + "`";
     if (cascade) {
       return dropDatabaseSql;
     }
 
     try (final Connection connection = this.dataSource.getConnection()) {
-      String query = "SHOW TABLES IN `" + databaseName + "`";
-      try (Statement statement = connection.createStatement()) {
-        // Execute the query and check if there exists any tables in the database
-        try (ResultSet resultSet = statement.executeQuery(query)) {
-          if (resultSet.next()) {
+
+      String query = "SELECT count(*) FROM information_schema.tables WHERE table_schema = ?";
+      try (PreparedStatement statement = connection.prepareStatement(query)) {
+        statement.setString(1, databaseName);
+        try (ResultSet resultSet = statement.executeQuery()) {
+          if (resultSet.next() && resultSet.getInt(1) > 0) {
             throw new IllegalStateException(
                 String.format(
                     "Database %s is not empty, the value of cascade should be true.",

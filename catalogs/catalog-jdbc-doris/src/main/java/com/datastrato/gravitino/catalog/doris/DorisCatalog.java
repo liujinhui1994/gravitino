@@ -17,6 +17,7 @@ import com.datastrato.gravitino.catalog.jdbc.converter.JdbcTypeConverter;
 import com.datastrato.gravitino.catalog.jdbc.operation.JdbcDatabaseOperations;
 import com.datastrato.gravitino.catalog.jdbc.operation.JdbcTableOperations;
 import com.datastrato.gravitino.connector.CatalogOperations;
+import com.datastrato.gravitino.connector.capability.Capability;
 import java.util.Map;
 
 /** Implementation of a Doris catalog in Gravitino. */
@@ -29,13 +30,18 @@ public class DorisCatalog extends JdbcCatalog {
 
   @Override
   protected CatalogOperations newOps(Map<String, String> config) {
-    JdbcTypeConverter<String> jdbcTypeConverter = createJdbcTypeConverter();
+    JdbcTypeConverter jdbcTypeConverter = createJdbcTypeConverter();
     return new MySQLProtocolCompatibleCatalogOperations(
         createExceptionConverter(),
         jdbcTypeConverter,
         createJdbcDatabaseOperations(),
         createJdbcTableOperations(),
         createJdbcColumnDefaultValueConverter());
+  }
+
+  @Override
+  public Capability newCapability() {
+    return new DorisCatalogCapability();
   }
 
   @Override

@@ -5,10 +5,10 @@
 
 package com.datastrato.gravitino.catalog.hadoop.integration.test;
 
-import static com.datastrato.gravitino.catalog.hadoop.kerberos.AuthenticationConfig.AUTH_TYPE_KEY;
-import static com.datastrato.gravitino.catalog.hadoop.kerberos.KerberosConfig.IMPERSONATION_ENABLE_KEY;
-import static com.datastrato.gravitino.catalog.hadoop.kerberos.KerberosConfig.KEY_TAB_URI_KEY;
-import static com.datastrato.gravitino.catalog.hadoop.kerberos.KerberosConfig.PRINCIPAL_KEY;
+import static com.datastrato.gravitino.catalog.hadoop.authentication.AuthenticationConfig.AUTH_TYPE_KEY;
+import static com.datastrato.gravitino.catalog.hadoop.authentication.kerberos.KerberosConfig.IMPERSONATION_ENABLE_KEY;
+import static com.datastrato.gravitino.catalog.hadoop.authentication.kerberos.KerberosConfig.KEY_TAB_URI_KEY;
+import static com.datastrato.gravitino.catalog.hadoop.authentication.kerberos.KerberosConfig.PRINCIPAL_KEY;
 import static org.apache.hadoop.hdfs.client.HdfsClientConfigKeys.DFS_DATA_TRANSFER_PROTECTION_KEY;
 
 import com.datastrato.gravitino.Catalog;
@@ -45,11 +45,13 @@ import org.apache.hadoop.security.authentication.util.KerberosName;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@Tag("gravitino-docker-it")
 public class HadoopUserImpersonationIT extends AbstractIT {
   private static final Logger LOG = LoggerFactory.getLogger(HadoopCatalogIT.class);
 

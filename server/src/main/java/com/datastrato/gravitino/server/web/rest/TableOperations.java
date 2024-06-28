@@ -25,6 +25,8 @@ import com.datastrato.gravitino.metrics.MetricNames;
 import com.datastrato.gravitino.rel.Table;
 import com.datastrato.gravitino.rel.TableChange;
 import com.datastrato.gravitino.server.web.Utils;
+import com.datastrato.gravitino.utils.NameIdentifierUtil;
+import com.datastrato.gravitino.utils.NamespaceUtil;
 import javax.inject.Inject;
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.DELETE;
@@ -68,7 +70,7 @@ public class TableOperations {
       return Utils.doAs(
           httpRequest,
           () -> {
-            Namespace tableNS = Namespace.ofTable(metalake, catalog, schema);
+            Namespace tableNS = NamespaceUtil.ofTable(metalake, catalog, schema);
             NameIdentifier[] idents =
                 TreeLockUtils.doWithTreeLock(
                     NameIdentifier.of(metalake, catalog, schema),
@@ -102,7 +104,7 @@ public class TableOperations {
           () -> {
             request.validate();
             NameIdentifier ident =
-                NameIdentifier.ofTable(metalake, catalog, schema, request.getName());
+                NameIdentifierUtil.ofTable(metalake, catalog, schema, request.getName());
 
             Table table =
                 TreeLockUtils.doWithTreeLock(
@@ -145,10 +147,8 @@ public class TableOperations {
       return Utils.doAs(
           httpRequest,
           () -> {
-            NameIdentifier ident = NameIdentifier.ofTable(metalake, catalog, schema, table);
-            Table t =
-                TreeLockUtils.doWithTreeLock(
-                    ident, LockType.READ, () -> dispatcher.loadTable(ident));
+            NameIdentifier ident = NameIdentifierUtil.ofTable(metalake, catalog, schema, table);
+            Table t = dispatcher.loadTable(ident);
             Response response = Utils.ok(new TableResponse(DTOConverters.toDTO(t)));
             LOG.info("Table loaded: {}.{}.{}.{}", metalake, catalog, schema, table);
             return response;
@@ -175,7 +175,7 @@ public class TableOperations {
           httpRequest,
           () -> {
             request.validate();
-            NameIdentifier ident = NameIdentifier.ofTable(metalake, catalog, schema, table);
+            NameIdentifier ident = NameIdentifierUtil.ofTable(metalake, catalog, schema, table);
             TableChange[] changes =
                 request.getUpdates().stream()
                     .map(TableUpdateRequest::tableChange)
@@ -217,7 +217,7 @@ public class TableOperations {
       return Utils.doAs(
           httpRequest,
           () -> {
-            NameIdentifier ident = NameIdentifier.ofTable(metalake, catalog, schema, table);
+            NameIdentifier ident = NameIdentifierUtil.ofTable(metalake, catalog, schema, table);
             boolean dropped =
                 TreeLockUtils.doWithTreeLock(
                     NameIdentifier.of(metalake, catalog, schema),

@@ -26,19 +26,22 @@ import com.datastrato.gravitino.rel.TableChange;
 import com.datastrato.gravitino.rel.expressions.NamedReference;
 import com.datastrato.gravitino.rel.expressions.distributions.Distribution;
 import com.datastrato.gravitino.rel.expressions.distributions.Distributions;
+import com.datastrato.gravitino.rel.expressions.sorts.SortOrder;
 import com.datastrato.gravitino.rel.expressions.transforms.Transforms;
 import com.datastrato.gravitino.rel.indexes.Index;
 import com.datastrato.gravitino.rel.indexes.Indexes;
 import com.datastrato.gravitino.rel.types.Types;
+import com.datastrato.gravitino.utils.RandomNameUtils;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -185,20 +188,16 @@ public class CatalogDorisIT extends AbstractIT {
     SupportsSchemas schemas = catalog.asSchemas();
 
     // test list schemas
-    NameIdentifier[] nameIdentifiers = schemas.listSchemas();
-    Set<String> schemaNames =
-        Arrays.stream(nameIdentifiers).map(NameIdentifier::name).collect(Collectors.toSet());
-    Assertions.assertTrue(schemaNames.contains(schemaName));
+    String[] schemaNames = schemas.listSchemas();
+    Assertions.assertTrue(Arrays.asList(schemaNames).contains(schemaName));
 
     // test create schema already exists
     String testSchemaName = GravitinoITUtils.genRandomName("create_schema_test");
     NameIdentifier schemaIdent = NameIdentifier.of(metalakeName, catalogName, testSchemaName);
     schemas.createSchema(schemaIdent.name(), schema_comment, Collections.emptyMap());
 
-    nameIdentifiers = schemas.listSchemas();
-    Map<String, NameIdentifier> schemaMap =
-        Arrays.stream(nameIdentifiers).collect(Collectors.toMap(NameIdentifier::name, v -> v));
-    Assertions.assertTrue(schemaMap.containsKey(testSchemaName));
+    List<String> schemaNameList = Arrays.asList(schemas.listSchemas());
+    Assertions.assertTrue(schemaNameList.contains(testSchemaName));
 
     Assertions.assertThrows(
         SchemaAlreadyExistsException.class,
@@ -215,10 +214,8 @@ public class CatalogDorisIT extends AbstractIT {
         NoSuchSchemaException.class, () -> schemas.loadSchema(schemaIdent.name()));
 
     // 2. check by list schema
-    nameIdentifiers = schemas.listSchemas();
-    schemaMap =
-        Arrays.stream(nameIdentifiers).collect(Collectors.toMap(NameIdentifier::name, v -> v));
-    Assertions.assertFalse(schemaMap.containsKey(testSchemaName));
+    schemaNameList = Arrays.asList(schemas.listSchemas());
+    Assertions.assertFalse(schemaNameList.contains(testSchemaName));
 
     // test drop schema not exists
     NameIdentifier notExistsSchemaIdent = NameIdentifier.of(metalakeName, catalogName, "no-exits");
@@ -234,7 +231,7 @@ public class CatalogDorisIT extends AbstractIT {
     catalog
         .asTableCatalog()
         .createTable(
-            NameIdentifier.of(metalakeName, catalogName, schemaName, tableName),
+            NameIdentifier.of(schemaName, tableName),
             createColumns(),
             "Created by gravitino client",
             createTableProperties(),
@@ -264,10 +261,68 @@ public class CatalogDorisIT extends AbstractIT {
   }
 
   @Test
+  void testSchemaWithIllegalName() {
+    SupportsSchemas schemas = catalog.asSchemas();
+    String databaseName = RandomNameUtils.genRandomName("it_db");
+    Map<String, String> properties = new HashMap<>();
+    String comment = "comment";
+
+    // should throw an exception with string that might contain SQL injection
+    String sqlInjection = databaseName + "`; DROP TABLE important_table; -- ";
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          schemas.createSchema(sqlInjection, comment, properties);
+        });
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          schemas.dropSchema(sqlInjection, false);
+        });
+
+    String sqlInjection1 = databaseName + "`; SLEEP(10); -- ";
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          schemas.createSchema(sqlInjection1, comment, properties);
+        });
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          schemas.dropSchema(sqlInjection1, false);
+        });
+
+    String sqlInjection2 =
+        databaseName + "`; UPDATE Users SET password = 'newpassword' WHERE username = 'admin'; -- ";
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          schemas.createSchema(sqlInjection2, comment, properties);
+        });
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          schemas.dropSchema(sqlInjection2, false);
+        });
+
+    // should throw an exception with input that has more than 64 characters
+    String invalidInput = StringUtils.repeat("a", 65);
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          schemas.createSchema(invalidInput, comment, properties);
+        });
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          schemas.dropSchema(invalidInput, false);
+        });
+  }
+
+  @Test
   void testDorisTableBasicOperation() {
     // create a table
-    NameIdentifier tableIdentifier =
-        NameIdentifier.of(metalakeName, catalogName, schemaName, tableName);
+    NameIdentifier tableIdentifier = NameIdentifier.of(schemaName, tableName);
     Column[] columns = createColumns();
 
     Distribution distribution = createDistribution();
@@ -301,18 +356,128 @@ public class CatalogDorisIT extends AbstractIT {
     // rename table
     String newTableName = GravitinoITUtils.genRandomName("new_table_name");
     tableCatalog.alterTable(tableIdentifier, TableChange.rename(newTableName));
-    NameIdentifier newTableIdentifier =
-        NameIdentifier.of(metalakeName, catalogName, schemaName, newTableName);
+    NameIdentifier newTableIdentifier = NameIdentifier.of(schemaName, newTableName);
     Table renamedTable = tableCatalog.loadTable(newTableIdentifier);
     ITUtils.assertionsTableInfo(
         newTableName, table_comment, Arrays.asList(columns), properties, indexes, renamedTable);
   }
 
   @Test
+  void testDorisIllegalTableName() {
+    Map<String, String> properties = createTableProperties();
+    TableCatalog tableCatalog = catalog.asTableCatalog();
+    String table_name = "t123";
+
+    String t1_name = table_name + "`; DROP TABLE important_table; -- ";
+    Column t1_col = Column.of(t1_name, Types.LongType.get(), "id", false, false, null);
+    Column[] columns = {t1_col};
+    Index[] t1_indexes = {Indexes.unique("u1_key", new String[][] {{t1_name}})};
+    NameIdentifier tableIdentifier =
+        NameIdentifier.of(metalakeName, catalogName, schemaName, t1_name);
+
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          tableCatalog.createTable(
+              tableIdentifier,
+              columns,
+              table_comment,
+              properties,
+              Transforms.EMPTY_TRANSFORM,
+              Distributions.NONE,
+              new SortOrder[0],
+              t1_indexes);
+        });
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          catalog.asTableCatalog().dropTable(tableIdentifier);
+        });
+
+    String t2_name = table_name + "`; SLEEP(10); -- ";
+    Column t2_col = Column.of(t2_name, Types.LongType.get(), "id", false, false, null);
+    Index[] t2_indexes = {Indexes.unique("u2_key", new String[][] {{t2_name}})};
+    Column[] columns2 = new Column[] {t2_col};
+    NameIdentifier tableIdentifier2 =
+        NameIdentifier.of(metalakeName, catalogName, schemaName, t2_name);
+
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          tableCatalog.createTable(
+              tableIdentifier2,
+              columns2,
+              table_comment,
+              properties,
+              Transforms.EMPTY_TRANSFORM,
+              Distributions.NONE,
+              new SortOrder[0],
+              t2_indexes);
+        });
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          catalog.asTableCatalog().dropTable(tableIdentifier2);
+        });
+
+    String t3_name =
+        table_name + "`; UPDATE Users SET password = 'newpassword' WHERE username = 'admin'; -- ";
+    Column t3_col = Column.of(t3_name, Types.LongType.get(), "id", false, false, null);
+    Index[] t3_indexes = {Indexes.unique("u3_key", new String[][] {{t3_name}})};
+    Column[] columns3 = new Column[] {t3_col};
+    NameIdentifier tableIdentifier3 =
+        NameIdentifier.of(metalakeName, catalogName, schemaName, t3_name);
+
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          tableCatalog.createTable(
+              tableIdentifier3,
+              columns3,
+              table_comment,
+              properties,
+              Transforms.EMPTY_TRANSFORM,
+              Distributions.NONE,
+              new SortOrder[0],
+              t3_indexes);
+        });
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          catalog.asTableCatalog().dropTable(tableIdentifier3);
+        });
+
+    String invalidInput = StringUtils.repeat("a", 65);
+    Column t4_col = Column.of(invalidInput, Types.LongType.get(), "id", false, false, null);
+    Index[] t4_indexes = {Indexes.unique("u4_key", new String[][] {{invalidInput}})};
+    Column[] columns4 = new Column[] {t4_col};
+    NameIdentifier tableIdentifier4 =
+        NameIdentifier.of(metalakeName, catalogName, schemaName, invalidInput);
+
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          tableCatalog.createTable(
+              tableIdentifier4,
+              columns4,
+              table_comment,
+              properties,
+              Transforms.EMPTY_TRANSFORM,
+              Distributions.NONE,
+              new SortOrder[0],
+              t4_indexes);
+        });
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          catalog.asTableCatalog().dropTable(tableIdentifier4);
+        });
+  }
+
+  @Test
   void testAlterDorisTable() {
     // create a table
-    NameIdentifier tableIdentifier =
-        NameIdentifier.of(metalakeName, catalogName, schemaName, tableName);
+    NameIdentifier tableIdentifier = NameIdentifier.of(schemaName, tableName);
     Column[] columns = createColumns();
 
     Distribution distribution = createDistribution();
@@ -404,8 +569,7 @@ public class CatalogDorisIT extends AbstractIT {
   void testDorisIndex() {
     String tableName = GravitinoITUtils.genRandomName("test_add_index");
 
-    NameIdentifier tableIdentifier =
-        NameIdentifier.of(metalakeName, catalogName, schemaName, tableName);
+    NameIdentifier tableIdentifier = NameIdentifier.of(schemaName, tableName);
     Column[] columns = createColumns();
 
     Distribution distribution = createDistribution();
@@ -425,7 +589,7 @@ public class CatalogDorisIT extends AbstractIT {
 
     // add index test.
     tableCatalog.alterTable(
-        NameIdentifier.of(metalakeName, catalogName, schemaName, tableName),
+        NameIdentifier.of(schemaName, tableName),
         TableChange.addIndex(
             Index.IndexType.PRIMARY_KEY, "k1_index", new String[][] {{DORIS_COL_NAME1}}));
 
@@ -437,14 +601,13 @@ public class CatalogDorisIT extends AbstractIT {
                 assertEquals(
                     1,
                     tableCatalog
-                        .loadTable(
-                            NameIdentifier.of(metalakeName, catalogName, schemaName, tableName))
+                        .loadTable(NameIdentifier.of(schemaName, tableName))
                         .index()
                         .length));
 
     // delete index and add new column and index.
     tableCatalog.alterTable(
-        NameIdentifier.of(metalakeName, catalogName, schemaName, tableName),
+        NameIdentifier.of(schemaName, tableName),
         TableChange.deleteIndex("k1_index", true),
         TableChange.addIndex(
             Index.IndexType.PRIMARY_KEY, "k2_index", new String[][] {{DORIS_COL_NAME2}}));
@@ -457,8 +620,7 @@ public class CatalogDorisIT extends AbstractIT {
                 assertEquals(
                     1,
                     tableCatalog
-                        .loadTable(
-                            NameIdentifier.of(metalakeName, catalogName, schemaName, tableName))
+                        .loadTable(NameIdentifier.of(schemaName, tableName))
                         .index()
                         .length));
   }

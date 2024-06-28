@@ -21,6 +21,7 @@ import com.datastrato.gravitino.server.ServerConfig;
 import com.datastrato.gravitino.server.web.JettyServerConfig;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -29,9 +30,14 @@ import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -39,6 +45,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.testcontainers.shaded.org.awaitility.Awaitility;
 
 @ExtendWith({PrintFuncNameExtension.class, CloseContainerExtension.class})
 public class AbstractIT {
@@ -72,6 +79,8 @@ public class AbstractIT {
 
   protected static String serverUri;
 
+  protected static String originConfig;
+
   public static int getGravitinoServerPort() {
     JettyServerConfig jettyServerConfig =
         JettyServerConfig.fromConfig(serverConfig, WEBSERVER_CONF_PREFIX);
@@ -83,29 +92,30 @@ public class AbstractIT {
   }
 
   private static void rewriteGravitinoServerConfig() throws IOException {
-    if (customConfigs.isEmpty()) return;
-
     String gravitinoHome = System.getenv("GRAVITINO_HOME");
+    Path configPath = Paths.get(gravitinoHome, "conf", GravitinoServer.CONF_FILE);
+    if (originConfig == null) {
+      originConfig = FileUtils.readFileToString(configPath.toFile(), StandardCharsets.UTF_8);
+    }
+
+    if (customConfigs.isEmpty()) return;
 
     String tmpFileName = GravitinoServer.CONF_FILE + ".tmp";
     Path tmpPath = Paths.get(gravitinoHome, "conf", tmpFileName);
     Files.deleteIfExists(tmpPath);
 
-    Path configPath = Paths.get(gravitinoHome, "conf", GravitinoServer.CONF_FILE);
     Files.move(configPath, tmpPath);
-
     ITUtils.rewriteConfigFile(tmpPath.toString(), configPath.toString(), customConfigs);
   }
 
   private static void recoverGravitinoServerConfig() throws IOException {
-    if (customConfigs.isEmpty()) return;
-
     String gravitinoHome = System.getenv("GRAVITINO_HOME");
-    String tmpFileName = GravitinoServer.CONF_FILE + ".tmp";
-    Path tmpPath = Paths.get(gravitinoHome, "conf", tmpFileName);
     Path configPath = Paths.get(gravitinoHome, "conf", GravitinoServer.CONF_FILE);
-    Files.deleteIfExists(configPath);
-    Files.move(tmpPath, configPath);
+
+    if (originConfig != null) {
+      Files.deleteIfExists(configPath);
+      FileUtils.write(configPath.toFile(), originConfig, StandardCharsets.UTF_8);
+    }
   }
 
   protected static void downLoadJDBCDriver() throws IOException {
@@ -153,7 +163,7 @@ public class AbstractIT {
               new File(
                   gravitinoHome
                       + String.format(
-                          "/scripts/mysql/schema-%s-mysql.sql", ConfigConstants.VERSION_0_5_0)),
+                          "/scripts/mysql/schema-%s-mysql.sql", ConfigConstants.VERSION_0_6_0)),
               "UTF-8");
       String[] initMySQLBackendSqls = mysqlContent.split(";");
       initMySQLBackendSqls = ArrayUtils.addFirst(initMySQLBackendSqls, "use " + META_DATA + ";");
@@ -210,6 +220,19 @@ public class AbstractIT {
       }
 
       GravitinoITUtils.startGravitinoServer();
+
+      JettyServerConfig jettyServerConfig =
+          JettyServerConfig.fromConfig(serverConfig, WEBSERVER_CONF_PREFIX);
+      String checkServerUrl =
+          "http://"
+              + jettyServerConfig.getHost()
+              + ":"
+              + jettyServerConfig.getHttpPort()
+              + "/metrics";
+      Awaitility.await()
+          .atMost(60, TimeUnit.SECONDS)
+          .pollInterval(1, TimeUnit.SECONDS)
+          .until(() -> isHttpServerUp(checkServerUrl));
     }
 
     JettyServerConfig jettyServerConfig =
@@ -270,6 +293,26 @@ public class AbstractIT {
     } catch (IOException e) {
       LOG.warn("Can't get git commit id for:", e);
       return "";
+    }
+  }
+
+  /**
+   * Check if the http server is up, If http response status code is 200, then we're assuming the
+   * server is up. Or else we assume the server is not ready.
+   *
+   * <p>Note: The method will ignore the response body and only check the status code.
+   *
+   * @param testUrl A url that we want to test ignore the response body.
+   * @return true if the server is up, false otherwise.
+   */
+  public static boolean isHttpServerUp(String testUrl) {
+    try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+      HttpGet request = new HttpGet(testUrl);
+      ClassicHttpResponse response = httpClient.execute(request, a -> a);
+      return response.getCode() == 200;
+    } catch (Exception e) {
+      LOG.warn("Check Gravitino server failed: ", e);
+      return false;
     }
   }
 }

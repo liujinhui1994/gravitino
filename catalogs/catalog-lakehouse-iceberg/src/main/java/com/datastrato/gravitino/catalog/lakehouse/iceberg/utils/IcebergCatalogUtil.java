@@ -5,12 +5,20 @@
 package com.datastrato.gravitino.catalog.lakehouse.iceberg.utils;
 
 import static com.datastrato.gravitino.catalog.lakehouse.iceberg.IcebergCatalogPropertiesMetadata.ICEBERG_JDBC_INITIALIZE;
+import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.HADOOP_SECURITY_AUTHENTICATION;
+import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.HADOOP_SECURITY_AUTHORIZATION;
 
 import com.datastrato.gravitino.catalog.lakehouse.iceberg.IcebergCatalogBackend;
 import com.datastrato.gravitino.catalog.lakehouse.iceberg.IcebergConfig;
+import com.datastrato.gravitino.catalog.lakehouse.iceberg.authentication.AuthenticationConfig;
+import com.datastrato.gravitino.catalog.lakehouse.iceberg.authentication.kerberos.HiveBackendProxy;
+import com.datastrato.gravitino.catalog.lakehouse.iceberg.authentication.kerberos.KerberosClient;
+import java.io.File;
+import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
 import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.catalog.Catalog;
@@ -26,10 +34,12 @@ public class IcebergCatalogUtil {
   private static final Logger LOG = LoggerFactory.getLogger(IcebergCatalogUtil.class);
 
   private static InMemoryCatalog loadMemoryCatalog(Map<String, String> properties) {
+    IcebergConfig icebergConfig = new IcebergConfig(properties);
+    String icebergCatalogName = icebergConfig.getCatalogBackendName("memory");
     InMemoryCatalog memoryCatalog = new InMemoryCatalog();
     Map<String, String> resultProperties = new HashMap<>(properties);
     resultProperties.put(CatalogProperties.WAREHOUSE_LOCATION, "/tmp");
-    memoryCatalog.initialize("memory", resultProperties);
+    memoryCatalog.initialize(icebergCatalogName, resultProperties);
     return memoryCatalog;
   }
 
@@ -37,14 +47,52 @@ public class IcebergCatalogUtil {
     HiveCatalog hiveCatalog = new HiveCatalog();
     HdfsConfiguration hdfsConfiguration = new HdfsConfiguration();
     properties.forEach(hdfsConfiguration::set);
-    hiveCatalog.setConf(hdfsConfiguration);
-    hiveCatalog.initialize("hive", properties);
-    return hiveCatalog;
+    IcebergConfig icebergConfig = new IcebergConfig(properties);
+    String icebergCatalogName = icebergConfig.getCatalogBackendName("hive");
+
+    AuthenticationConfig authenticationConfig = new AuthenticationConfig(properties);
+    if (authenticationConfig.isSimpleAuth()) {
+      hiveCatalog.setConf(hdfsConfiguration);
+      hiveCatalog.initialize(icebergCatalogName, properties);
+      return hiveCatalog;
+    } else if (authenticationConfig.isKerberosAuth()) {
+      Map<String, String> resultProperties = new HashMap<>(properties);
+      resultProperties.put(CatalogProperties.CLIENT_POOL_CACHE_KEYS, "USER_NAME");
+      hdfsConfiguration.set(HADOOP_SECURITY_AUTHORIZATION, "true");
+      hdfsConfiguration.set(HADOOP_SECURITY_AUTHENTICATION, "kerberos");
+      hiveCatalog.setConf(hdfsConfiguration);
+      hiveCatalog.initialize(icebergCatalogName, properties);
+
+      String realm = initKerberosAndReturnRealm(properties, hdfsConfiguration);
+      if (authenticationConfig.isImpersonationEnabled()) {
+        HiveBackendProxy proxyHiveCatalog =
+            new HiveBackendProxy(resultProperties, hiveCatalog, realm);
+        return proxyHiveCatalog.getProxy();
+      }
+
+      return hiveCatalog;
+    } else {
+      throw new UnsupportedOperationException(
+          "Unsupported authentication method: " + authenticationConfig.getAuthType());
+    }
+  }
+
+  private static String initKerberosAndReturnRealm(
+      Map<String, String> properties, Configuration conf) {
+    try {
+      KerberosClient kerberosClient = new KerberosClient(properties, conf);
+      File keytabFile =
+          kerberosClient.saveKeyTabFileFromUri(Long.valueOf(properties.get("catalog_uuid")));
+      return kerberosClient.login(keytabFile.getAbsolutePath());
+    } catch (IOException e) {
+      throw new RuntimeException("Failed to login with kerberos", e);
+    }
   }
 
   private static JdbcCatalog loadJdbcCatalog(Map<String, String> properties) {
     IcebergConfig icebergConfig = new IcebergConfig(properties);
     String driverClassName = icebergConfig.getJdbcDriver();
+    String icebergCatalogName = icebergConfig.getCatalogBackendName("jdbc");
 
     icebergConfig.get(IcebergConfig.JDBC_USER);
     icebergConfig.get(IcebergConfig.JDBC_PASSWORD);
@@ -63,16 +111,18 @@ public class IcebergCatalogUtil {
     HdfsConfiguration hdfsConfiguration = new HdfsConfiguration();
     properties.forEach(hdfsConfiguration::set);
     jdbcCatalog.setConf(hdfsConfiguration);
-    jdbcCatalog.initialize("jdbc", properties);
+    jdbcCatalog.initialize(icebergCatalogName, properties);
     return jdbcCatalog;
   }
 
   private static Catalog loadRestCatalog(Map<String, String> properties) {
+    IcebergConfig icebergConfig = new IcebergConfig(properties);
+    String icebergCatalogName = icebergConfig.getCatalogBackendName("rest");
     RESTCatalog restCatalog = new RESTCatalog();
     HdfsConfiguration hdfsConfiguration = new HdfsConfiguration();
     properties.forEach(hdfsConfiguration::set);
     restCatalog.setConf(hdfsConfiguration);
-    restCatalog.initialize("rest", properties);
+    restCatalog.initialize(icebergCatalogName, properties);
     return restCatalog;
   }
 

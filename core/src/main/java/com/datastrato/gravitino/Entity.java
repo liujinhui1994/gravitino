@@ -23,9 +23,6 @@ public interface Entity extends Serializable {
   /** The system reserved catalog name. */
   String SYSTEM_CATALOG_RESERVED_NAME = "system";
 
-  /** The securable object reserved entity name. */
-  String SECURABLE_ENTITY_RESERVED_NAME = "*";
-
   /** The authorization catalog name in the system metalake. */
   String AUTHORIZATION_CATALOG_NAME = "authorization";
 
@@ -34,11 +31,27 @@ public interface Entity extends Serializable {
 
   /** The group schema name in the system catalog. */
   String GROUP_SCHEMA_NAME = "group";
+
   /** The role schema name in the system catalog. */
   String ROLE_SCHEMA_NAME = "role";
 
   /** The admin schema name in the authorization catalog of the system metalake. */
   String ADMIN_SCHEMA_NAME = "admin";
+
+  /** The tag schema name in the system catalog. */
+  String TAG_SCHEMA_NAME = "tag";
+
+  /**
+   * All metalakes are a virtual entity. It represents all the metalakes. We don't store it. We use
+   * a specific type to represent its entity type.
+   */
+  String ALL_METALAKES_ENTITY_TYPE = "ROOT";
+
+  /**
+   * All metalakes are a virtual entity. It represents all the metalakes. We don't store it. We use
+   * a specific id to represent its entity id.
+   */
+  long ALL_METALAKES_ENTITY_ID = 0;
 
   /** Enumeration defining the types of entities in the Gravitino framework. */
   @Getter
@@ -53,6 +66,7 @@ public interface Entity extends Serializable {
     USER("us", 7),
     GROUP("gr", 8),
     ROLE("ro", 9),
+    TAG("ta", 10),
 
     AUDIT("au", 65534);
 

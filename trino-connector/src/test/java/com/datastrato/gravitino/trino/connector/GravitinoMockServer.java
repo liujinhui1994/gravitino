@@ -129,12 +129,10 @@ public class GravitinoMockServer implements AutoCloseable {
     when(metaLake.name()).thenReturn(metalakeName);
     when(metaLake.listCatalogs())
         .thenAnswer(
-            new Answer<NameIdentifier[]>() {
+            new Answer<String[]>() {
               @Override
-              public NameIdentifier[] answer(InvocationOnMock invocation) throws Throwable {
-                return metalakes.get(metalakeName).catalogs.keySet().stream()
-                    .map(catalogName -> NameIdentifier.ofCatalog(metalakeName, catalogName))
-                    .toArray(NameIdentifier[]::new);
+              public String[] answer(InvocationOnMock invocation) throws Throwable {
+                return metalakes.get(metalakeName).catalogs.keySet().toArray(String[]::new);
               };
             });
 
@@ -267,9 +265,9 @@ public class GravitinoMockServer implements AutoCloseable {
 
     when(schemas.listSchemas())
         .thenAnswer(
-            new Answer<NameIdentifier[]>() {
+            new Answer<String[]>() {
               @Override
-              public NameIdentifier[] answer(InvocationOnMock invocation) throws Throwable {
+              public String[] answer(InvocationOnMock invocation) throws Throwable {
                 MemoryConnector memoryConnector =
                     (MemoryConnector)
                         catalogConnectorManager
@@ -277,12 +275,7 @@ public class GravitinoMockServer implements AutoCloseable {
                                 catalogConnectorManager.getTrinoCatalogName(catalog))
                             .getInternalConnector();
                 ConnectorMetadata metadata = memoryConnector.getMetadata(null, null);
-                return metadata.listSchemaNames(null).stream()
-                    .map(
-                        schemaName ->
-                            NameIdentifier.ofSchema(
-                                catalog.getMetalake(), catalog.getName(), schemaName))
-                    .toArray(NameIdentifier[]::new);
+                return metadata.listSchemaNames(null).toArray(new String[0]);
               }
             });
 
@@ -412,12 +405,7 @@ public class GravitinoMockServer implements AutoCloseable {
                 ConnectorMetadata metadata = memoryConnector.getMetadata(null, null);
                 ArrayList<NameIdentifier> tableNames = new ArrayList<>();
                 for (SchemaTableName tableName : metadata.listTables(null, Optional.empty())) {
-                  tableNames.add(
-                      NameIdentifier.ofTable(
-                          schemaName.level(0),
-                          schemaName.level(1),
-                          schemaName.level(2),
-                          tableName.getTableName()));
+                  tableNames.add(NameIdentifier.of(schemaName.level(0), tableName.getTableName()));
                 }
                 return tableNames.toArray(new NameIdentifier[tableNames.size()]);
               }
@@ -600,13 +588,13 @@ public class GravitinoMockServer implements AutoCloseable {
 
     TableName(NameIdentifier nameIdentifier) {
       Preconditions.checkArgument(
-          nameIdentifier.namespace().length() == 3,
+          nameIdentifier.namespace().length() == 1,
           "Not a table nameIdentifier: " + nameIdentifier);
       this.nameIdentifier = nameIdentifier;
     }
 
     String schema() {
-      return nameIdentifier.namespace().level(2);
+      return nameIdentifier.namespace().level(0);
     }
 
     String table() {

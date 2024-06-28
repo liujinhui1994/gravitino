@@ -117,7 +117,6 @@ public class HiveUserAuthenticationIT extends AbstractIT {
     System.clearProperty("java.security.krb5.conf");
     System.clearProperty("sun.security.krb5.debug");
 
-    AbstractIT.customConfigs.clear();
     AbstractIT.client = null;
   }
 
@@ -232,8 +231,7 @@ public class HiveUserAuthenticationIT extends AbstractIT {
         () -> catalog.asSchemas().createSchema(SCHEMA_NAME, "comment", ImmutableMap.of()));
 
     // Create table
-    NameIdentifier tableNameIdentifier =
-        NameIdentifier.of(METALAKE_NAME, CATALOG_NAME, SCHEMA_NAME, TABLE_NAME);
+    NameIdentifier tableNameIdentifier = NameIdentifier.of(SCHEMA_NAME, TABLE_NAME);
     catalog
         .asTableCatalog()
         .createTable(
@@ -247,8 +245,7 @@ public class HiveUserAuthenticationIT extends AbstractIT {
 
     // Now try to alter the table
     catalog.asTableCatalog().alterTable(tableNameIdentifier, TableChange.rename("new_table"));
-    NameIdentifier newTableIdentifier =
-        NameIdentifier.of(METALAKE_NAME, CATALOG_NAME, SCHEMA_NAME, "new_table");
+    NameIdentifier newTableIdentifier = NameIdentifier.of(SCHEMA_NAME, "new_table");
 
     // Old table name should not exist
     Assertions.assertFalse(catalog.asTableCatalog().tableExists(tableNameIdentifier));

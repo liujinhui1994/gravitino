@@ -46,7 +46,6 @@ public class CatalogConnectorMetadata {
   private static final String CATALOG_DOES_NOT_EXIST_MSG = "Catalog does not exist";
   private static final String SCHEMA_DOES_NOT_EXIST_MSG = "Schema does not exist";
 
-  private final GravitinoMetalake metalake;
   private final String catalogName;
   private final SupportsSchemas schemaCatalog;
   private final TableCatalog tableCatalog;
@@ -54,7 +53,6 @@ public class CatalogConnectorMetadata {
   public CatalogConnectorMetadata(GravitinoMetalake metalake, NameIdentifier catalogIdentifier) {
     try {
       this.catalogName = catalogIdentifier.name();
-      this.metalake = metalake;
       Catalog catalog = metalake.loadCatalog(catalogName);
       // Make sure the catalog support schema operations.
       this.schemaCatalog = catalog.asSchemas();
@@ -71,7 +69,7 @@ public class CatalogConnectorMetadata {
 
   public List<String> listSchemaNames() {
     try {
-      return Arrays.stream(schemaCatalog.listSchemas()).map(NameIdentifier::name).toList();
+      return Arrays.asList(schemaCatalog.listSchemas());
     } catch (NoSuchCatalogException e) {
       throw new TrinoException(GRAVITINO_CATALOG_NOT_EXISTS, CATALOG_DOES_NOT_EXIST_MSG, e);
     }
@@ -88,9 +86,7 @@ public class CatalogConnectorMetadata {
 
   public GravitinoTable getTable(String schemaName, String tableName) {
     try {
-      Table table =
-          tableCatalog.loadTable(
-              NameIdentifier.ofTable(metalake.name(), catalogName, schemaName, tableName));
+      Table table = tableCatalog.loadTable(NameIdentifier.of(schemaName, tableName));
       return new GravitinoTable(schemaName, tableName, table);
     } catch (NoSuchTableException e) {
       throw new TrinoException(GRAVITINO_TABLE_NOT_EXISTS, "Table does not exist", e);
@@ -99,8 +95,7 @@ public class CatalogConnectorMetadata {
 
   public List<String> listTables(String schemaName) {
     try {
-      NameIdentifier[] tables =
-          tableCatalog.listTables(Namespace.ofTable(metalake.name(), catalogName, schemaName));
+      NameIdentifier[] tables = tableCatalog.listTables(Namespace.of(schemaName));
       return Arrays.stream(tables).map(NameIdentifier::name).toList();
     } catch (NoSuchSchemaException e) {
       throw new TrinoException(GRAVITINO_SCHEMA_NOT_EXISTS, SCHEMA_DOES_NOT_EXIST_MSG, e);
@@ -108,14 +103,11 @@ public class CatalogConnectorMetadata {
   }
 
   public boolean tableExists(String schemaName, String tableName) {
-    return tableCatalog.tableExists(
-        NameIdentifier.ofTable(metalake.name(), catalogName, schemaName, tableName));
+    return tableCatalog.tableExists(NameIdentifier.of(schemaName, tableName));
   }
 
   public void createTable(GravitinoTable table, boolean ignoreExisting) {
-    NameIdentifier identifier =
-        NameIdentifier.ofTable(
-            metalake.name(), catalogName, table.getSchemaName(), table.getName());
+    NameIdentifier identifier = NameIdentifier.of(table.getSchemaName(), table.getName());
     try {
       tableCatalog.createTable(
           identifier,
@@ -160,8 +152,7 @@ public class CatalogConnectorMetadata {
   public void dropTable(SchemaTableName tableName) {
     boolean dropped =
         tableCatalog.dropTable(
-            NameIdentifier.ofTable(
-                metalake.name(), catalogName, tableName.getSchemaName(), tableName.getTableName()));
+            NameIdentifier.of(tableName.getSchemaName(), tableName.getTableName()));
     if (!dropped) {
       throw new TrinoException(GRAVITINO_OPERATION_FAILED, "Failed to drop table " + tableName);
     }
@@ -174,9 +165,7 @@ public class CatalogConnectorMetadata {
   private void applyAlter(SchemaTableName tableName, TableChange... change) {
     try {
       tableCatalog.alterTable(
-          NameIdentifier.ofTable(
-              metalake.name(), catalogName, tableName.getSchemaName(), tableName.getTableName()),
-          change);
+          NameIdentifier.of(tableName.getSchemaName(), tableName.getTableName()), change);
     } catch (NoSuchTableException e) {
       throw new TrinoException(GRAVITINO_TABLE_NOT_EXISTS, "Table does not exist");
     } catch (IllegalArgumentException e) {

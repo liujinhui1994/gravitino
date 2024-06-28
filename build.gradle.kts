@@ -466,7 +466,7 @@ tasks.rat {
     "web/dist/**/*",
     "web/node_modules/**/*",
     "web/src/lib/utils/axios/**/*",
-    "web/src/lib/enums/httpEnum.ts",
+    "web/src/lib/enums/httpEnum.js",
     "web/src/types/axios.d.ts",
     "web/yarn.lock",
     "web/package-lock.json",
@@ -641,6 +641,7 @@ tasks {
     dependsOn(
       ":catalogs:catalog-hive:copyLibAndConfig",
       ":catalogs:catalog-lakehouse-iceberg:copyLibAndConfig",
+      ":catalogs:catalog-lakehouse-paimon:copyLibAndConfig",
       ":catalogs:catalog-jdbc-doris:copyLibAndConfig",
       ":catalogs:catalog-jdbc-mysql:copyLibAndConfig",
       ":catalogs:catalog-jdbc-postgresql:copyLibAndConfig",
@@ -728,8 +729,8 @@ fun printMacDockerTip() {
 }
 
 fun checkMacDockerConnector() {
-  if (OperatingSystem.current().isLinux()) {
-    // Linux does not require the use of `docker-connector`
+  if (!OperatingSystem.current().isMacOsX()) {
+    // Only MacOs requires the use of `docker-connector`
     return
   }
 
@@ -764,7 +765,7 @@ fun checkDockerStatus() {
 }
 
 fun checkOrbStackStatus() {
-  if (OperatingSystem.current().isLinux()) {
+  if (!OperatingSystem.current().isMacOsX()) {
     return
   }
 

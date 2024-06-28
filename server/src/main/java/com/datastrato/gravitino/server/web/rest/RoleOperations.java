@@ -7,18 +7,25 @@ package com.datastrato.gravitino.server.web.rest;
 import com.codahale.metrics.annotation.ResponseMetered;
 import com.codahale.metrics.annotation.Timed;
 import com.datastrato.gravitino.GravitinoEnv;
+import com.datastrato.gravitino.MetadataObject;
+import com.datastrato.gravitino.MetadataObjects;
+import com.datastrato.gravitino.NameIdentifier;
 import com.datastrato.gravitino.authorization.AccessControlManager;
 import com.datastrato.gravitino.authorization.Privilege;
 import com.datastrato.gravitino.authorization.Privileges;
 import com.datastrato.gravitino.authorization.SecurableObject;
 import com.datastrato.gravitino.authorization.SecurableObjects;
+import com.datastrato.gravitino.dto.authorization.SecurableObjectDTO;
 import com.datastrato.gravitino.dto.requests.RoleCreateRequest;
 import com.datastrato.gravitino.dto.responses.DeleteResponse;
 import com.datastrato.gravitino.dto.responses.RoleResponse;
 import com.datastrato.gravitino.dto.util.DTOConverters;
+import com.datastrato.gravitino.lock.LockType;
+import com.datastrato.gravitino.lock.TreeLockUtils;
 import com.datastrato.gravitino.metrics.MetricNames;
 import com.datastrato.gravitino.server.web.Utils;
-import com.google.common.base.Preconditions;
+import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Collectors;
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.DELETE;
@@ -68,32 +75,34 @@ public class RoleOperations {
   @ResponseMetered(name = "create-role", absolute = true)
   public Response createRole(@PathParam("metalake") String metalake, RoleCreateRequest request) {
     try {
-      // TODO: Supports multiple securable objects. There will be some limited support for multiple
-      //  securable objects in the future.
-      //  The securable objects in the same role should under the same catalog.
-      //  If a role contains a metalake securable object, the role can't contain any other securable
-      //  object.
-      Preconditions.checkArgument(
-          request.getSecurableObjects() != null && request.getSecurableObjects().length == 1,
-          "The size of securable objects must be 1");
+
+      for (SecurableObjectDTO object : request.getSecurableObjects()) {
+        checkSecurableObject(metalake, object);
+      }
 
       return Utils.doAs(
           httpRequest,
           () -> {
-            SecurableObject securableObject =
-                SecurableObjects.parse(
-                    request.getSecurableObjects()[0].fullName(),
-                    request.getSecurableObjects()[0].type(),
-                    request.getSecurableObjects()[0].privileges().stream()
-                        .map(
-                            privilege -> {
-                              if (privilege.condition().equals(Privilege.Condition.ALLOW)) {
-                                return Privileges.allow(privilege.name());
-                              } else {
-                                return Privileges.deny(privilege.name());
-                              }
-                            })
-                        .collect(Collectors.toList()));
+            List<SecurableObject> securableObjects =
+                Arrays.stream(request.getSecurableObjects())
+                    .map(
+                        securableObjectDTO ->
+                            SecurableObjects.parse(
+                                securableObjectDTO.fullName(),
+                                securableObjectDTO.type(),
+                                securableObjectDTO.privileges().stream()
+                                    .map(
+                                        privilege -> {
+                                          if (privilege
+                                              .condition()
+                                              .equals(Privilege.Condition.ALLOW)) {
+                                            return Privileges.allow(privilege.name());
+                                          } else {
+                                            return Privileges.deny(privilege.name());
+                                          }
+                                        })
+                                    .collect(Collectors.toList())))
+                    .collect(Collectors.toList());
 
             return Utils.ok(
                 new RoleResponse(
@@ -102,7 +111,7 @@ public class RoleOperations {
                             metalake,
                             request.getName(),
                             request.getProperties(),
-                            securableObject))));
+                            securableObjects))));
           });
 
     } catch (Exception e) {
@@ -131,5 +140,77 @@ public class RoleOperations {
     } catch (Exception e) {
       return ExceptionHandlers.handleRoleException(OperationType.DELETE, role, metalake, e);
     }
+  }
+
+  // Check every securable object whether exists and is imported.
+  static void checkSecurableObject(String metalake, SecurableObjectDTO object) {
+    NameIdentifier identifier;
+
+    // Securable object ignores the metalake namespace, so we should add it back.
+    if (object.type() == MetadataObject.Type.METALAKE) {
+      // All metalakes don't need to check the securable object whether exists.
+      if (object.name().equals(MetadataObjects.METADATA_OBJECT_RESERVED_NAME)) {
+        return;
+      }
+      identifier = NameIdentifier.parse(object.fullName());
+    } else {
+      identifier = NameIdentifier.parse(String.format("%s.%s", metalake, object.fullName()));
+    }
+
+    String existErrMsg = "Securable object % doesn't exist";
+
+    TreeLockUtils.doWithTreeLock(
+        identifier,
+        LockType.READ,
+        () -> {
+          switch (object.type()) {
+            case METALAKE:
+              if (!GravitinoEnv.getInstance().metalakeDispatcher().metalakeExists(identifier)) {
+                throw new IllegalArgumentException(String.format(existErrMsg, object.fullName()));
+              }
+
+              break;
+
+            case CATALOG:
+              if (!GravitinoEnv.getInstance().catalogDispatcher().catalogExists(identifier)) {
+                throw new IllegalArgumentException(String.format(existErrMsg, object.fullName()));
+              }
+
+              break;
+
+            case SCHEMA:
+              if (!GravitinoEnv.getInstance().schemaDispatcher().schemaExists(identifier)) {
+                throw new IllegalArgumentException(String.format(existErrMsg, object.fullName()));
+              }
+
+              break;
+
+            case FILESET:
+              if (!GravitinoEnv.getInstance().filesetDispatcher().filesetExists(identifier)) {
+                throw new IllegalArgumentException(String.format(existErrMsg, object.fullName()));
+              }
+
+              break;
+            case TABLE:
+              if (!GravitinoEnv.getInstance().tableDispatcher().tableExists(identifier)) {
+                throw new IllegalArgumentException(String.format(existErrMsg, object.fullName()));
+              }
+
+              break;
+
+            case TOPIC:
+              if (!GravitinoEnv.getInstance().topicDispatcher().topicExists(identifier)) {
+                throw new IllegalArgumentException(String.format(existErrMsg, object.fullName()));
+              }
+
+              break;
+
+            default:
+              throw new IllegalArgumentException(
+                  String.format("Doesn't support the type %s", object.type()));
+          }
+
+          return null;
+        });
   }
 }

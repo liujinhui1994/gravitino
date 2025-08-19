@@ -84,3 +84,5 @@ include(":bundles:aliyun", ":bundles:aliyun-bundle")
 include(":bundles:azure", ":bundles:azure-bundle")
 include(":catalogs:hadoop-common")
 include(":lineage")
+include("bundles:tencent")
+findProject(":bundles:tencent")?.name = "tencent"

@@ -10,6 +10,7 @@ import org.apache.gravitino.storage.COSNProperties;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.cosn.CosNFileSystem;
 
 import javax.annotation.Nonnull;
 import java.io.IOException;
@@ -40,8 +41,7 @@ public class COSNFileSystemProvider implements FileSystemProvider, SupportsCrede
 
         Configuration configuration = FileSystemUtils.createConfiguration(hadoopConfMap);
 
-
-        //return AliyunOSSFileSystem.newInstance(path.toUri(), configuration);
+        return CosNFileSystem.newInstance(path.toUri(), configuration);
     }
 
     @Override
@@ -56,6 +56,9 @@ public class COSNFileSystemProvider implements FileSystemProvider, SupportsCrede
 
     @Override
     public Map<String, String> getFileSystemCredentialConf(Credential[] credentials) {
+
+
+
         return SupportsCredentialVending.super.getFileSystemCredentialConf(credentials);
     }
 }
